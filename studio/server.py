@@ -1,13 +1,18 @@
 """Small same-origin HTTP dashboard. All mutations are explicit JSON POSTs."""
 import base64
 import binascii
+import hashlib
+import hmac
 import json
 import mimetypes
 import os
 import re
+import secrets
 import threading
+import time
+from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from . import analytics, media
 from .core import (PILLARS, ROOT, SCORE_LIMITS, STATUSES, Store, StudioError, add_claim,
@@ -21,6 +26,8 @@ STORE = Store()
 JOBS = {}
 JOBS_LOCK = threading.Lock()
 MACHINE_LOCK = threading.Lock()  # CPU/memory: one media/API production job at a time.
+SESSION_COOKIE = "studio_session"
+SESSION_MAX_AGE = 12 * 60 * 60
 
 
 def files_for(p):
@@ -202,8 +209,112 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(content)
 
+    def respond_html(self, content, status=200):
+        body = content.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
+        self.end_headers()
+        self.wfile.write(body)
+
+    @staticmethod
+    def configured_credentials():
+        password = os.environ.get("STUDIO_ACCESS_PASSWORD", "")
+        secret = os.environ.get("SESSION_SECRET", "")
+        if len(password) < 16 or len(secret) < 32:
+            return None
+        return password, secret
+
+    @staticmethod
+    def session_signature(expiry, password, secret):
+        key = hmac.new(secret.encode(), b"faceless-studio-session:" + password.encode(), hashlib.sha256).digest()
+        return hmac.new(key, str(expiry).encode(), hashlib.sha256).hexdigest()
+
+    def is_authorized(self):
+        credentials = self.configured_credentials()
+        if credentials is None:
+            return False
+        password, secret = credentials
+        try:
+            cookies = SimpleCookie(self.headers.get("Cookie", ""))
+            token = cookies[SESSION_COOKIE].value
+            expiry_text, signature = token.split(".", 1)
+            expiry = int(expiry_text)
+        except (CookieError, KeyError, ValueError, TypeError):
+            return False
+        if expiry <= int(time.time()) or expiry > int(time.time()) + SESSION_MAX_AGE + 60:
+            return False
+        expected = self.session_signature(expiry, password, secret)
+        try:
+            return secrets.compare_digest(signature.encode("ascii"), expected.encode("ascii"))
+        except UnicodeEncodeError:
+            return False
+
+    def login_page(self, status=200, error=""):
+        message = f'<p role="alert" style="color:#a33">{error}</p>' if error else ""
+        content = f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sign in · Documentary Studio</title><style>
+*{{box-sizing:border-box}}body{{margin:0;min-height:100vh;display:grid;place-items:center;background:#f3f1e8;color:#202522;font:16px system-ui,sans-serif}}
+main{{width:min(440px,calc(100% - 32px));padding:36px;background:#fff;border:1px solid #deddd5;border-radius:12px;box-shadow:0 12px 40px #20252212}}
+h1{{font-size:28px;margin:0 0 8px}}p{{line-height:1.5;color:#535950}}label{{display:block;margin:24px 0 8px;font-weight:600}}
+input{{width:100%;padding:12px;border:1px solid #a9ada4;border-radius:6px;font:inherit}}button{{margin-top:18px;width:100%;padding:12px;border:0;border-radius:6px;background:#253c39;color:white;font:inherit;font-weight:700;cursor:pointer}}
+</style></head><body><main><h1>Documentary Studio</h1><p>Sign in to access your private production workspace.</p>{message}
+<form method="post" action="/auth/login"><label for="password">Studio password</label><input id="password" name="password" type="password" autocomplete="current-password" required autofocus><button type="submit">Sign in</button></form></main></body></html>"""
+        self.respond_html(content, status)
+
+    def unauthorized(self):
+        path = urlparse(self.path).path
+        if path.startswith(("/api/", "/files/")):
+            return self.respond({"error":"Sign in to access the studio."}, 401)
+        self.send_response(303)
+        self.send_header("Location", "/login")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def same_origin(self):
+        origin = self.headers.get("Origin")
+        return not origin or urlparse(origin).netloc == self.headers.get("Host")
+
+    def login(self):
+        if not self.same_origin():
+            return self.login_page(403, "Cross-site sign-in is not allowed.")
+        credentials = self.configured_credentials()
+        if credentials is None:
+            return self.login_page(503, "Studio access is not configured. Set STUDIO_ACCESS_PASSWORD (at least 16 characters) and SESSION_SECRET (at least 32 characters) in Replit Secrets, then restart.")
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            if length <= 0 or length > 4096:
+                raise ValueError
+            form = parse_qs(self.rfile.read(length).decode("utf-8"), keep_blank_values=True)
+            supplied = form.get("password", [""])[0]
+        except (ValueError, UnicodeError):
+            return self.login_page(400, "Enter a valid studio password.")
+        password, secret = credentials
+        if not secrets.compare_digest(supplied.encode("utf-8"), password.encode("utf-8")):
+            return self.login_page(401, "The studio password is incorrect.")
+        expiry = int(time.time()) + SESSION_MAX_AGE
+        signature = self.session_signature(expiry, password, secret)
+        token = f"{expiry}.{signature}"
+        self.send_response(303)
+        self.send_header("Location", "/")
+        self.send_header("Set-Cookie", f"{SESSION_COOKIE}={token}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age={SESSION_MAX_AGE}")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def do_GET(self):
         try:
+            if urlparse(self.path).path == "/login":
+                if self.configured_credentials() is None:
+                    return self.login_page(503, "Studio access is not configured. Set STUDIO_ACCESS_PASSWORD (at least 16 characters) and SESSION_SECRET (at least 32 characters) in Replit Secrets, then restart.")
+                return self.login_page()
+            if not self.is_authorized():
+                return self.unauthorized()
             self.get_route()
         except StudioError as e:
             self.respond({"error":str(e)}, 404)
@@ -295,10 +406,23 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         try:
+            path = unquote(urlparse(self.path).path)
+            if path == "/auth/login":
+                return self.login()
+            if not self.is_authorized():
+                return self.unauthorized()
+            if path == "/auth/logout":
+                if not self.same_origin():
+                    return self.respond({"error":"Cross-site changes are not allowed."}, 403)
+                self.send_response(303)
+                self.send_header("Location", "/login")
+                self.send_header("Set-Cookie", f"{SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", "0")
+                return self.end_headers()
             if self.headers.get("X-Studio-Request") != "1":
                 raise StudioError("Use the studio dashboard to make changes.")
-            origin = self.headers.get("Origin")
-            if origin and urlparse(origin).netloc != self.headers.get("Host"):
+            if not self.same_origin():
                 raise StudioError("Cross-site changes are not allowed.")
             length = int(self.headers.get("Content-Length", "0"))
             if length <= 0 or length > 72 * 1024 * 1024:
@@ -309,7 +433,6 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError
             except (ValueError, UnicodeError):
                 raise StudioError("Send a valid JSON form.") from None
-            path = unquote(urlparse(self.path).path)
             if path == "/api/projects":
                 return self.respond(enriched(STORE.create(data)), 201)
             match = re.fullmatch(r"/api/projects/([a-f0-9]{12})/([a-z_]+)", path)

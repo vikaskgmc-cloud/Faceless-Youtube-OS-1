@@ -4,6 +4,10 @@ Frontend: vanilla HTML/CSS/JS in `web/`, served by Python on port 5000.
 Use relative fetch, JSON requests with `X-Studio-Request: 1`. Errors: `{"error":"plain message"}`.
 No dependencies, frameworks or build step required. Do not use emojis.
 
+## Access
+
+All dashboard pages, project/settings APIs, background-job actions, exports and media downloads require an authenticated session. Sign in at `/login` using the `STUDIO_ACCESS_PASSWORD` secret. The app requires that password to be at least 16 characters and `SESSION_SECRET` to be at least 32 characters; it fails closed if either is missing or too short. Sign-out is a same-origin POST to `/auth/logout`. Keep deployment access private; app authentication is not permission to publish or broaden sharing.
+
 GET /api/overview -> {projects:[Project], statuses:[...], pillars:[...], settings:{providers:[{name,ready,missing:[key]}],ffmpeg:bool}, jobs:{id:{running,message,error}}}
 GET /api/projects/{id} -> Project (enriched with fact_check, next_action, analytics_report, files, job)
 POST /api/projects {topic,pillar,series?,next_idea?,quality?:"4K"|"HD"} -> Project.

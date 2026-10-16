@@ -26,6 +26,12 @@ Add these in **Replit Secrets** or environment variables, then restart. Never pa
 
 Adapters use direct HTTPS through Python's `urllib`; account connections do not automatically populate these variables. Settings reports missing names, never values. Manual editors work without paid providers. Live steps fail explicitly when unconfigured. Review provider credit limits, commercial-use plans and content licenses.
 
+## Private access
+
+The studio requires a single-operator password before serving any workspace page, project data, settings, API mutation, background job, script export or media download. Configure `STUDIO_ACCESS_PASSWORD` as a secret with at least 16 characters and `SESSION_SECRET` as a secret with at least 32 characters, then restart the app. Sessions are signed, expire after 12 hours, and use an HttpOnly, Secure, SameSite cookie. Missing or too-short credentials fail closed; there is no default password or public setup mode. Sign out from the studio header to clear that browser's session cookie.
+
+Keep any Replit deployment private as well; app sign-in does not make a public deployment appropriate. This project has not been published or made public.
+
 ## Editorial safeguards
 
 - Statuses only advance one step: IDEA → SELECTED → RESEARCHING → RESEARCH_COMPLETE → SCRIPTING → SCRIPT_REVIEW → APPROVED → VOICE → VISUALS → EDITING → QA → THUMBNAIL → UPLOAD_READY → PUBLISHED → ANALYZING.
@@ -62,6 +68,6 @@ Recommendations compare to the channel's **own median of at least 3 earlier manu
 
 Each `projects/<id>/project.json` is readable, atomically saved JSON, with evidence, revisions and approvals. Its `voice/`, `media/`, `render/` and `uploads/` folders are ignored by Git. Source, prompts and tests stay in the connected repository. Back up **whole project folders**, including media.
 
-This is a **private single-operator workspace tool, without user authentication**. Keep the workspace/preview private. Do not expose publicly before adding access control. Cross-origin mutation checks and output allowlists are not a login system. Local files are not durable autoscaling deployment storage.
+This is a **private single-operator workspace tool protected by app-level sign-in**. Keep the workspace/preview and any deployment private. App sign-in is not a reason to expose the app publicly. Cross-origin mutation checks and output allowlists remain defense in depth, not replacements for sign-in. Local files are not durable autoscaling deployment storage.
 
 One production job runs at a time. Progress is in memory; after a restart, rerun to resume saved stages, voice chunks and shot caches. Long 4K renders need substantial CPU, disk and time. Tests use temporary fictional data and synthesized media only, never paid APIs. Human editorial review and finishing remain necessary; no app can guarantee enterprise production quality or YouTube popularity.

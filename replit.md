@@ -12,7 +12,7 @@
 - Human gates must remain code-enforced. Autopilot cannot confirm scores, approve, select topics, edit existing claims or publish.
 - Keep Python's standard-library pipeline and readable per-project JSON folders. No database migration or JS workspace restructure.
 - Keep secrets in the environment only. Provider error responses must never expose credentials or exception bodies. Prompt files are editable under prompts/.
-- This dashboard is a private, single-operator workspace tool, not a public multi-user service. No authentication is currently installed. Do not recommend public deployment before access control and durable media storage are added.
+- This dashboard is a private, single-operator workspace tool, not a public multi-user service. Server-side authentication protects every page, API route, job, export and media download. Keep deployment access private; never publish or broaden sharing without explicit user approval. Required secrets: STUDIO_ACCESS_PASSWORD (16+ characters) and SESSION_SECRET (32+ characters).
 - Media directories, uploads and generated test output must remain outside Git. Do not seed fictional test projects into the real dashboard.
 
 ## Provider access
