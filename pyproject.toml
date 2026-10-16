@@ -1,0 +1,6 @@
+[project]
+name = "faceless-youtube-os"
+version = "0.1.0"
+description = "Human-controlled documentary production. Never uploads or publishes."
+requires-python = ">=3.11"
+dependencies = []

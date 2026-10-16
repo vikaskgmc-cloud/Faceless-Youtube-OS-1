@@ -1,0 +1,1 @@
+- [Provider transport constraints](provider-transport.md) — preserve the standard-library runtime; connected accounts are not a substitute for the app's environment credentials.

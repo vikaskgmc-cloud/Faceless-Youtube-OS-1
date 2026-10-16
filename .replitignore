@@ -1,0 +1,4 @@
+/generated-artifacts/
+/projects/
+__pycache__/
+.env

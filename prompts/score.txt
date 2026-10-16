@@ -1,0 +1,2 @@
+Suggest a DRAFT score for the supplied topic. Return ONLY JSON with numerical curiosity (0-25), audience (0-20), story (0-20), visuals (0-10), evergreen (0-10), monetization (0-10), difficulty (0-5), and a short rationale.
+The maximum is 95 before a difficulty deduction. This is NOT a selection or human confirmation.
